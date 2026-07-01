@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gutenkit"
+version = "0.1.0"
+description = "A headless CLI for browsing and downloading Project Gutenberg books."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Sean Armstrong" }]
+dependencies = []  # standard library only
+
+[project.scripts]
+gutenkit = "gutenkit.cli:main"
+
+[tool.setuptools]
+packages = ["gutenkit"]
