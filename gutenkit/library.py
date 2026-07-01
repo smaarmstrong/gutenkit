@@ -10,6 +10,9 @@ DATA_DIR = os.path.join(
 )
 LIBRARY_JSON = os.path.join(DATA_DIR, "library.json")
 
+# Plain-text renders of EPUBs, so txtread can read them.
+CACHE_DIR = os.path.join(DATA_DIR, "cache")
+
 # Where the actual book files are stored. Override with GUTENKIT_BOOKS_DIR.
 BOOKS_DIR = os.environ.get(
     "GUTENKIT_BOOKS_DIR", os.path.expanduser("~/Books/gutenberg")

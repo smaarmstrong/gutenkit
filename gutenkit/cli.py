@@ -2,13 +2,14 @@
 
 import argparse
 import datetime
+import json
 import os
 import shutil
 import subprocess
 import sys
 import urllib.request
 
-from . import __version__, api, library
+from . import __version__, api, epub, library
 
 
 # --- small output helpers --------------------------------------------------
@@ -59,14 +60,17 @@ def cmd_search(args):
         page=args.page,
     )
     count = data.get("count", 0)
-    results = data.get("results", [])
+    results = data.get("results", [])[: args.limit]
+    if args.json:
+        print(json.dumps(results, indent=2))
+        return 0
     if not results:
         print("No matches.")
         return 0
-    shown = min(len(results), args.limit)
+    shown = len(results)
     print(dim(f"{count} match(es); showing {shown} (page {args.page})"))
     print()
-    for i, book in enumerate(results[: args.limit], 1):
+    for i, book in enumerate(results, 1):
         print_book_line(book, i)
     print()
     print(dim("Download with:  gutenkit get <id>"))
@@ -80,6 +84,9 @@ def cmd_info(args):
     if not book:
         err(f"No book with id {args.id}")
         return 1
+    if args.json:
+        print(json.dumps(book, indent=2))
+        return 0
     print(bold(book["title"]))
     print(f"  by {api.authors_str(book)}")
     print(f"  id:        {book['id']}")
@@ -148,14 +155,35 @@ def cmd_get(args):
     )
     print(f"Saved to {dest}")
 
-    if fmt == "txt":
-        if args.read:
-            return _open_in_reader(dest)
-        if _tty() and sys.stdin.isatty():
-            ans = input("Open in txtread now? [y/N] ").strip().lower()
-            if ans in ("y", "yes"):
-                return _open_in_reader(dest)
+    if args.read:
+        return _read(dest, fmt)
+    if _tty() and sys.stdin.isatty():
+        ans = input("Open in txtread now? [y/N] ").strip().lower()
+        if ans in ("y", "yes"):
+            return _read(dest, fmt)
     return 0
+
+
+def _txt_from_epub(epub_path):
+    """Render an EPUB to a cached .txt (rebuilt if the EPUB is newer)."""
+    os.makedirs(library.CACHE_DIR, exist_ok=True)
+    base = os.path.splitext(os.path.basename(epub_path))[0]
+    cache = os.path.join(library.CACHE_DIR, base + ".txt")
+    if not os.path.exists(cache) or os.path.getmtime(cache) < os.path.getmtime(epub_path):
+        with open(cache, "w", encoding="utf-8") as f:
+            f.write(epub.to_text(epub_path))
+    return cache
+
+
+def _read(path, fmt):
+    """Open a downloaded book in txtread, converting EPUB to text first."""
+    if fmt == "epub":
+        try:
+            path = _txt_from_epub(path)
+        except epub.EpubError as e:
+            err(f"gutenkit: could not read EPUB: {e}")
+            return 1
+    return _open_in_reader(path)
 
 
 def _open_in_reader(path):
@@ -169,6 +197,9 @@ def _open_in_reader(path):
 
 def cmd_library(args):
     lib = library.load()
+    if args.json:
+        print(json.dumps(list(lib.values()), indent=2))
+        return 0
     if not lib:
         print("Library is empty. Try:  gutenkit search <query>")
         return 0
@@ -189,11 +220,7 @@ def cmd_read(args):
     if not os.path.exists(entry["path"]):
         err(f"File is missing: {entry['path']}\nRe-download with:  gutenkit get {args.id}")
         return 1
-    if entry["format"] != "txt":
-        err(f"#{args.id} is {entry['format']}, which txtread can't display. File is at:")
-        print(entry["path"])
-        return 1
-    return _open_in_reader(entry["path"])
+    return _read(entry["path"], entry["format"])
 
 
 def cmd_remove(args):
@@ -224,10 +251,12 @@ def build_parser():
                    help="sort order (default: popular)")
     s.add_argument("--page", type=int, default=1, help="results page number")
     s.add_argument("--limit", type=int, default=15, help="max results to show")
+    s.add_argument("--json", action="store_true", help="output raw JSON")
     s.set_defaults(func=cmd_search)
 
     i = sub.add_parser("info", help="show details for a book id")
     i.add_argument("id", type=int)
+    i.add_argument("--json", action="store_true", help="output raw JSON")
     i.set_defaults(func=cmd_info)
 
     g = sub.add_parser("get", help="download a book by id")
@@ -237,6 +266,7 @@ def build_parser():
     g.set_defaults(func=cmd_get)
 
     ll = sub.add_parser("library", aliases=["list"], help="list downloaded books")
+    ll.add_argument("--json", action="store_true", help="output raw JSON")
     ll.set_defaults(func=cmd_library)
 
     r = sub.add_parser("read", help="open a downloaded book in txtread")

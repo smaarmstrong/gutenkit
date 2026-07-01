@@ -28,17 +28,34 @@ gutenkit get 1342 --read                    # download then open in txtread
 gutenkit library                            # list what you've downloaded
 gutenkit read 1342                          # open a downloaded book in txtread
 gutenkit remove 1342 --delete-file
+
+gutenkit search dickens --json              # machine-readable output
+gutenkit info 1342 --json
+gutenkit library --json
 ```
 
 ## Reading
 
-`gutenkit get` / `gutenkit read` open `.txt` books in `txtread`, which remembers your
-place between sessions. EPUBs are downloaded but not opened by `txtread`.
+`gutenkit get` / `gutenkit read` open books in `txtread`, which remembers your place
+between sessions. `.txt` books open directly; EPUBs are rendered to plain text on the
+fly (stdlib `zipfile` + `html.parser` — no dependencies) and cached, then opened in
+`txtread` too.
+
+## Headless / scripting
+
+Standard library only, so it runs on a bare headless box (RHEL/Rocky, Python 3.8+) with
+no `pip install` of dependencies. `--json` on `search`/`info`/`library` gives parseable
+output for pipelines. Bash completion in [`completions/gutenkit.bash`](completions/gutenkit.bash):
+
+```sh
+cp completions/gutenkit.bash /etc/bash_completion.d/gutenkit   # or source it from ~/.bashrc
+```
 
 ## Where things live
 
 - Downloaded files: `~/Books/gutenberg/` (override with `GUTENKIT_BOOKS_DIR`)
 - Library index: `~/.local/share/gutenkit/library.json`
+- EPUB text cache: `~/.local/share/gutenkit/cache/`
 
 ## License
 
