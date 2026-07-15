@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gutenkit"
-version = "0.2.0"
-description = "A headless CLI for browsing and downloading Project Gutenberg books."
+version = "0.3.0"
+description = "A headless CLI for browsing and downloading free books from Project Gutenberg, Standard Ebooks, and Perseus."
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
@@ -16,4 +16,4 @@ dependencies = []  # standard library only
 gutenkit = "gutenkit.cli:main"
 
 [tool.setuptools]
-packages = ["gutenkit"]
+packages = ["gutenkit", "gutenkit.providers"]

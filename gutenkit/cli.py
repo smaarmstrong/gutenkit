@@ -7,9 +7,8 @@ import os
 import shutil
 import subprocess
 import sys
-import urllib.request
 
-from . import __version__, api, epub, library
+from . import __version__, epub, library, providers
 
 
 # --- small output helpers --------------------------------------------------
@@ -36,64 +35,82 @@ def err(msg):
 
 # --- rendering -------------------------------------------------------------
 
-def print_book_line(book, index=None):
-    fmts = api.available_formats(book)
+def print_book_line(book):
+    fmts = book.get("formats", [])
     fmt_str = dim(f"[{'/'.join(fmts) or 'no dl'}]")
     langs = ",".join(book.get("languages", []))
-    downloads = book.get("download_count", 0)
-    prefix = f"{index:>2}. " if index is not None else ""
-    print(
-        f"{prefix}{bold('#' + str(book['id']))}  {book['title']}"
-    )
-    print(
-        f"      {api.authors_str(book)}  "
-        f"{dim(langs)}  {dim('↓' + str(downloads))}  {fmt_str}"
-    )
+    extra = book.get("extra", {})
+    tail = ""
+    if "download_count" in extra:
+        tail = dim(f"  ↓{extra['download_count']}")
+    print(f"  {bold(book['uid'])}  {book['title']}")
+    print(f"      {book['authors']}  {dim(langs)}{tail}  {fmt_str}")
 
 
 def cmd_search(args):
-    data = api.search(
-        query=args.query,
-        topic=args.topic,
-        languages=args.lang,
-        sort=args.sort,
-        page=args.page,
-    )
-    count = data.get("count", 0)
-    results = data.get("results", [])[: args.limit]
+    provs = providers.select(args.source)
+    groups, everything = [], []
+    for p in provs:
+        try:
+            data = p.search(
+                args.query, topic=args.topic, languages=args.lang,
+                sort=args.sort, page=args.page, limit=args.limit,
+            )
+        except providers.ProviderError as e:
+            err(dim(f"! {p.label}: {e}"))
+            continue
+        groups.append((p, data))
+        everything.extend(data["results"])
+
     if args.json:
-        print(json.dumps(results, indent=2))
+        print(json.dumps(everything, indent=2))
         return 0
-    if not results:
+
+    shown_any = False
+    for p, data in groups:
+        results = data["results"]
+        if not results:
+            continue
+        shown_any = True
+        count = data.get("count")
+        count_str = f"{count} match(es)" if count is not None else "matches"
+        more = ", more available" if data.get("has_more") else ""
+        print(bold(p.label) + dim(f" — {count_str}, showing {len(results)}{more}"))
+        for book in results:
+            print_book_line(book)
+        print()
+
+    if not shown_any:
         print("No matches.")
         return 0
-    shown = len(results)
-    print(dim(f"{count} match(es); showing {shown} (page {args.page})"))
-    print()
-    for i, book in enumerate(results, 1):
-        print_book_line(book, i)
-    print()
-    print(dim("Download with:  gutenkit get <id>"))
-    if data.get("next"):
-        print(dim(f"More results:   gutenkit search ... --page {args.page + 1}"))
+    print(dim("Details:  gutenkit info <uid>     Download:  gutenkit get <uid>"))
     return 0
 
 
 def cmd_info(args):
-    book = api.by_id(args.id)
+    source, local_id = providers.parse_uid(args.id)
+    book = providers.get(source).by_id(local_id)
     if not book:
         err(f"No book with id {args.id}")
         return 1
     if args.json:
         print(json.dumps(book, indent=2))
         return 0
+    extra = book.get("extra", {})
     print(bold(book["title"]))
-    print(f"  by {api.authors_str(book)}")
-    print(f"  id:        {book['id']}")
-    print(f"  languages: {', '.join(book.get('languages', []))}")
-    print(f"  downloads: {book.get('download_count', 0)}")
-    print(f"  formats:   {', '.join(api.available_formats(book)) or 'none'}")
-    subjects = book.get("subjects", [])
+    print(f"  by {book['authors']}")
+    print(f"  uid:       {book['uid']}")
+    print(f"  source:    {providers.get(source).label}")
+    print(f"  languages: {', '.join(book.get('languages', [])) or '-'}")
+    print(f"  formats:   {', '.join(book.get('formats', [])) or 'none'}")
+    if "download_count" in extra:
+        print(f"  downloads: {extra['download_count']}")
+    editions = extra.get("editions")
+    if editions:
+        print("  editions:")
+        for ed in editions:
+            print(f"    - {ed['id']}  ({ed['lang']}, {ed['kind']})")
+    subjects = extra.get("subjects", [])
     if subjects:
         print("  subjects:")
         for s in subjects[:12]:
@@ -101,53 +118,33 @@ def cmd_info(args):
     return 0
 
 
-def _download(url, dest):
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    req = urllib.request.Request(url, headers={"User-Agent": api.USER_AGENT})
-    tmp = dest + ".part"
-    with urllib.request.urlopen(req, timeout=60) as resp, open(tmp, "wb") as out:
-        total = int(resp.headers.get("Content-Length", 0))
-        got = 0
-        while True:
-            chunk = resp.read(65536)
-            if not chunk:
-                break
-            out.write(chunk)
-            got += len(chunk)
-            if _tty():
-                if total:
-                    pct = got * 100 // total
-                    sys.stdout.write(f"\r  downloading… {pct:3d}%")
-                else:
-                    sys.stdout.write(f"\r  downloading… {got // 1024} KiB")
-                sys.stdout.flush()
-    os.replace(tmp, dest)
-    if _tty():
-        sys.stdout.write("\r" + " " * 40 + "\r")
-        sys.stdout.flush()
-
-
 def cmd_get(args):
-    book = api.by_id(args.id)
+    source, local_id = providers.parse_uid(args.id)
+    provider = providers.get(source)
+    book = provider.by_id(local_id)
     if not book:
         err(f"No book with id {args.id}")
         return 1
-    fmt = args.format
-    url = api.pick_format(book, fmt)
-    if not url:
-        avail = api.available_formats(book)
-        err(f"No {fmt} format for '{book['title']}'. Available: {', '.join(avail) or 'none'}")
+
+    fmt = args.format or provider.default_format
+    if fmt not in book["formats"]:
+        avail = ", ".join(book["formats"]) or "none"
+        err(f"No {fmt} format for '{book['title']}'. Available: {avail}")
         return 1
 
-    ext = "txt" if fmt == "txt" else "epub"
-    dest = os.path.join(library.BOOKS_DIR, library.filename_for(book["id"], book["title"], ext))
-    print(f"Getting {bold(book['title'])} — {api.authors_str(book)} ({fmt})")
-    _download(url, dest)
+    ext = "epub" if fmt == "epub" else "txt"
+    dest = os.path.join(
+        library.BOOKS_DIR, library.filename_for(source, local_id, book["title"], ext)
+    )
+    print(f"Getting {bold(book['title'])} — {book['authors']} ({fmt})")
+    provider.download(book, fmt, dest)
 
     library.add(
-        book["id"],
+        book["uid"],
+        source=source,
+        local_id=local_id,
         title=book["title"],
-        authors=api.authors_str(book),
+        authors=book["authors"],
         language=",".join(book.get("languages", [])),
         fmt=fmt,
         path=dest,
@@ -167,8 +164,8 @@ def cmd_get(args):
 def _txt_from_epub(epub_path):
     """Render an EPUB to a cached .txt (rebuilt if the EPUB is newer)."""
     os.makedirs(library.CACHE_DIR, exist_ok=True)
-    base = os.path.splitext(os.path.basename(epub_path))[0]
-    cache = os.path.join(library.CACHE_DIR, base + ".txt")
+    base_name = os.path.splitext(os.path.basename(epub_path))[0]
+    cache = os.path.join(library.CACHE_DIR, base_name + ".txt")
     if not os.path.exists(cache) or os.path.getmtime(cache) < os.path.getmtime(epub_path):
         with open(cache, "w", encoding="utf-8") as f:
             f.write(epub.to_text(epub_path))
@@ -205,63 +202,104 @@ def cmd_library(args):
         return 0
     for entry in sorted(lib.values(), key=lambda e: e["title"].lower()):
         missing = "" if os.path.exists(entry["path"]) else dim("  (file missing)")
-        print(f"{bold('#' + str(entry['id']))}  {entry['title']}  {dim('(' + entry['format'] + ')')}{missing}")
+        print(f"{bold(entry['uid'])}  {entry['title']}  "
+              f"{dim('(' + entry['format'] + ')')}{missing}")
         print(f"      {entry['authors']}")
     print()
-    print(dim("Read with:  gutenkit read <id>"))
+    print(dim("Read with:  gutenkit read <uid>"))
     return 0
 
 
 def cmd_read(args):
-    entry = library.get(args.id)
+    source, local_id = providers.parse_uid(args.id)
+    uid = f"{source}:{local_id}"
+    entry = library.get(uid)
     if not entry:
-        err(f"#{args.id} is not in your library. Download it first:  gutenkit get {args.id}")
+        err(f"{uid} is not in your library. Download it first:  gutenkit get {uid}")
         return 1
     if not os.path.exists(entry["path"]):
-        err(f"File is missing: {entry['path']}\nRe-download with:  gutenkit get {args.id}")
+        err(f"File is missing: {entry['path']}\nRe-download with:  gutenkit get {uid}")
         return 1
     return _read(entry["path"], entry["format"])
 
 
 def cmd_remove(args):
-    entry = library.remove(args.id)
+    source, local_id = providers.parse_uid(args.id)
+    uid = f"{source}:{local_id}"
+    entry = library.remove(uid)
     if not entry:
-        err(f"#{args.id} is not in your library.")
+        err(f"{uid} is not in your library.")
         return 1
-    print(f"Removed #{args.id} '{entry['title']}' from library.")
+    print(f"Removed {uid} '{entry['title']}' from library.")
     if args.delete_file and os.path.exists(entry["path"]):
         os.remove(entry["path"])
         print(f"Deleted file {entry['path']}")
     return 0
 
 
+def cmd_sources(args):
+    if args.json:
+        print(json.dumps(
+            [{"name": p.name, "aliases": list(p.aliases), "label": p.label,
+              "formats": p.formats_help} for p in providers.all_providers()],
+            indent=2,
+        ))
+        return 0
+    print(dim("Search a subset with:  gutenkit search <q> --source <name>[,<name>]"
+              "  (or --source all)"))
+    print()
+    for p in providers.all_providers():
+        aka = f"  (aka {', '.join(p.aliases)})" if p.aliases else ""
+        print(f"{bold(p.name)}{dim(aka)}")
+        print(f"      {p.label} — {p.formats_help}")
+    return 0
+
+
+def cmd_index(args):
+    name = providers.get(args.provider).name
+    if name != "perseus":
+        err(f"'{name}' needs no index; only Perseus does.")
+        return 1
+    from .providers import perseus
+    if perseus._load_catalog() is not None and not args.rebuild:
+        print("Perseus index already present. Use --rebuild to refresh it.")
+        return 0
+    err("Building the Perseus catalogue — this streams ~130 MB of TEI metadata "
+        "from GitHub once, then caches it.")
+    perseus.build_index(log=lambda m: err(dim("  " + m)))
+    return 0
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="gutenkit",
-        description="Browse and download Project Gutenberg books from the terminal.",
+        description="Browse and download free books from several sources.",
     )
     p.add_argument("--version", action="version", version=f"gutenkit {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 
-    s = sub.add_parser("search", help="search the catalog by title/author/topic")
+    s = sub.add_parser("search", help="search catalogues by title/author/topic")
     s.add_argument("query", nargs="?", help="free-text search of title and author")
+    s.add_argument("--source", help="comma-separated sources, or 'all' "
+                   "(default: gutenberg). See `gutenkit sources`.")
     s.add_argument("--topic", help="filter by subject/bookshelf keyword")
-    s.add_argument("--lang", help="language code(s), comma-separated, e.g. en,fr")
+    s.add_argument("--lang", help="language code(s), comma-separated, e.g. en,la,grc")
     s.add_argument("--sort", choices=["popular", "ascending", "descending"],
-                   help="sort order (default: popular)")
+                   help="sort order (Gutenberg only)")
     s.add_argument("--page", type=int, default=1, help="results page number")
-    s.add_argument("--limit", type=int, default=15, help="max results to show")
+    s.add_argument("--limit", type=int, default=15, help="max results per source")
     s.add_argument("--json", action="store_true", help="output raw JSON")
     s.set_defaults(func=cmd_search)
 
-    i = sub.add_parser("info", help="show details for a book id")
-    i.add_argument("id", type=int)
+    i = sub.add_parser("info", help="show details for a book uid")
+    i.add_argument("id", metavar="uid", help="e.g. 1342 or perseus:tlg0012.tlg001")
     i.add_argument("--json", action="store_true", help="output raw JSON")
     i.set_defaults(func=cmd_info)
 
-    g = sub.add_parser("get", help="download a book by id")
-    g.add_argument("id", type=int)
-    g.add_argument("--format", choices=["txt", "epub"], default="txt")
+    g = sub.add_parser("get", help="download a book by uid")
+    g.add_argument("id", metavar="uid")
+    g.add_argument("--format", choices=["txt", "epub"],
+                   help="download format (default: the source's usual format)")
     g.add_argument("--read", action="store_true", help="open in txtread after download")
     g.set_defaults(func=cmd_get)
 
@@ -270,13 +308,22 @@ def build_parser():
     ll.set_defaults(func=cmd_library)
 
     r = sub.add_parser("read", help="open a downloaded book in txtread")
-    r.add_argument("id", type=int)
+    r.add_argument("id", metavar="uid")
     r.set_defaults(func=cmd_read)
 
     rm = sub.add_parser("remove", help="remove a book from the library")
-    rm.add_argument("id", type=int)
+    rm.add_argument("id", metavar="uid")
     rm.add_argument("--delete-file", action="store_true", help="also delete the file")
     rm.set_defaults(func=cmd_remove)
+
+    so = sub.add_parser("sources", help="list available sources")
+    so.add_argument("--json", action="store_true", help="output raw JSON")
+    so.set_defaults(func=cmd_sources)
+
+    ix = sub.add_parser("index", help="build a source's local catalogue (Perseus)")
+    ix.add_argument("provider", nargs="?", default="perseus")
+    ix.add_argument("--rebuild", action="store_true", help="rebuild even if present")
+    ix.set_defaults(func=cmd_index)
 
     return p
 
@@ -285,7 +332,7 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)
-    except api.ApiError as e:
+    except providers.ProviderError as e:
         err(f"gutenkit: {e}")
         return 1
     except KeyboardInterrupt:
