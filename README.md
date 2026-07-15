@@ -15,11 +15,12 @@ for place-remembering reading.
 ## Install
 
 ```sh
-pip install --user -e ~/armstrong/gutenkit
+pip install --user -e ~/armstrong/gutenkit    # or, from the repo:  make install
 ```
 
 This puts a `gutenkit` command on your PATH (via `~/.local/bin`). You can also run it
-without installing via `python -m gutenkit`.
+without installing via `python -m gutenkit`. Run `make` (or `make help`) for the other
+chores: `check` (byte-compile), `test` (offline smoke), `index`, `completions`, `clean`.
 
 ## Book ids (uids)
 
