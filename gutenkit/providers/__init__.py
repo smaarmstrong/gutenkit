@@ -8,11 +8,12 @@ from .base import Provider, ProviderError, make_record  # noqa: F401
 from .gutenberg import Gutenberg
 from .perseus import Perseus
 from .standardebooks import StandardEbooks
+from .wikisource import Wikisource
 
 DEFAULT_SOURCE = "gutenberg"
 
 # Registration order = display order in aggregated search.
-_PROVIDERS = [Gutenberg(), StandardEbooks(), Perseus()]
+_PROVIDERS = [Gutenberg(), StandardEbooks(), Wikisource(), Perseus()]
 
 _BY_NAME = {}
 for _p in _PROVIDERS:

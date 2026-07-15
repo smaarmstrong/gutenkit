@@ -6,6 +6,8 @@ A small, headless CLI for browsing and downloading free books from several sourc
   books, via the [Gutendex](https://gutendex.com) JSON API (`txt`, `epub`).
 - **[Standard Ebooks](https://standardebooks.org)** — carefully typeset public-domain
   classics (`epub`, rendered to text for reading).
+- **[Wikisource](https://wikisource.org)** — the free library, one wiki per language
+  (English, Latin, Greek, …); works assembled to `epub` via ws-export.
 - **[Perseus](https://www.perseus.tufts.edu)** — the canonical Greek & Latin corpora as
   TEI, rendered to plain text (original-language editions, often with translations).
 
@@ -48,6 +50,7 @@ gutenkit search dickens --sort popular --limit 20 --page 2
 gutenkit search "jane austen" --source gutenberg,standardebooks
 gutenkit search homer --source perseus --lang grc
 gutenkit search cicero --source perseus --lang la
+gutenkit search "bello gallico" --source wikisource --lang la
 gutenkit search austen --source all
 
 # details / download / read — by uid
@@ -78,6 +81,18 @@ cached catalogue (individual texts are fetched as raw TEI on `get`). Language co
 `grc` (Ancient Greek), `la`/`lat` (Latin), `en`/`eng` (translations). `get` downloads the
 original-language edition by default; pass an edition uid (e.g.
 `perseus:tlg0012.tlg001.perseus-eng3`) to fetch a specific translation.
+
+## Wikisource
+
+Wikisource is one wiki per language; `--lang` picks the subdomain(s): `en`, `la`
+(Latin), `el`/`grc` (Greek), and others pass through. Search hits both whole works and
+chapter subpages. Downloads go through the ws-export service, which assembles a work
+(following its subpages) into an EPUB; the author is read back from that EPUB.
+
+Note: ws-export can only assemble what the page transcludes or links as subpages. A
+well-structured edition comes through complete; a portal/"versions" landing page whose
+contents live on separate top-level pages may yield only a thin file — in that case pick
+the specific edition or subpage from the search results.
 
 ## Reading
 
