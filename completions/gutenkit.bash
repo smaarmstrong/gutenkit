@@ -17,7 +17,7 @@ _gutenkit() {
     # complete source names after --source
     local prev="${COMP_WORDS[COMP_CWORD-1]}"
     if [ "$prev" = "--source" ]; then
-        COMPREPLY=( $(compgen -W "gutenberg standardebooks perseus all" -- "$cur") )
+        COMPREPLY=( $(compgen -W "gutenberg standardebooks wikisource perseus all" -- "$cur") )
         return
     fi
 

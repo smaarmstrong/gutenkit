@@ -99,6 +99,23 @@ def _spine_hrefs(zf, opf_path):
     return hrefs
 
 
+def opf_metadata(epub_path):
+    """Return {"title", "creator"} from the EPUB's Dublin Core metadata, as
+    available. Best-effort: returns {} if the file can't be read."""
+    try:
+        with zipfile.ZipFile(epub_path) as zf:
+            with zf.open(_opf_path(zf)) as f:
+                root = ET.parse(f).getroot()
+    except (KeyError, zipfile.BadZipFile, ET.ParseError, EpubError):
+        return {}
+    meta = {}
+    for el in root.iter():
+        name = _localname(el)
+        if name in ("title", "creator") and name not in meta and (el.text or "").strip():
+            meta[name] = el.text.strip()
+    return meta
+
+
 def to_text(epub_path):
     """Return the full text of an EPUB in spine order."""
     try:

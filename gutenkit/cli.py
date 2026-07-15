@@ -139,6 +139,13 @@ def cmd_get(args):
     print(f"Getting {bold(book['title'])} — {book['authors']} ({fmt})")
     provider.download(book, fmt, dest)
 
+    # Fill in an unknown author from the EPUB's own metadata when we can
+    # (Wikisource, in particular, only learns the author at this point).
+    if ext == "epub" and book["authors"] in ("", "Unknown"):
+        creator = epub.opf_metadata(dest).get("creator")
+        if creator:
+            book["authors"] = creator
+
     library.add(
         book["uid"],
         source=source,
